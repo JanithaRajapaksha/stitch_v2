@@ -1,0 +1,11 @@
+# Environments
+.env
+
+# VSCode
+.vscode/
+
+# Snaps
+thread_v2_snaps/
+
+# ChAruco
+ChAruco-Calibration/
