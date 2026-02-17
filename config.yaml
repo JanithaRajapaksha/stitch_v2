@@ -9,6 +9,8 @@ camera:
   index: 0
   width: 480
   height: 640
+  calib_path: "camera_calibration.json"
+  extr_path: "camera_extrinsics.json"
 
 output:
   directory: "thread_v2_snaps"
