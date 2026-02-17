@@ -15,6 +15,7 @@ from mysql.connector import Error
 from dotenv import load_dotenv
 import yaml
 import json
+from mqtt_heartbeat import MqttHeartbeat
 
 # ---------------------------
 # Calibration Helper Functions
@@ -86,10 +87,24 @@ DB_CONFIG = {
 DB_TABLE = os.getenv("DB_TABLE")
 
 # ---------------------------
+# MQTT Config (Heartbeat)
+# -------------------------
+MQTT_SERVER = os.getenv("MQTT_SERVER", "mqtt.anc.idea8.cloud")
+MQTT_PORT = int(os.getenv("MQTT_PORT", "8883"))
+MQTT_USERNAME = os.getenv("MQTT_USERNAME", 'backend')
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", 'bbf12cwcpm')
+
+# device id = DB_TABLE (as you specified)
+DEVICE_ID = DB_TABLE
+MQTT_HEARTBEAT_TOPIC = f"machine/{DEVICE_ID}/status/heartbeat"
+MQTT_HEARTBEAT_INTERVAL = 2.0  # seconds
+MQTT_TLS_INSECURE = os.getenv("MQTT_TLS_INSECURE", "true").lower() in ('true', '1', 't')
+
+# ---------------------------
 # Open a single, global serial connection
 # ---------------------------
 try:
-    ser = serial.Serial(SERIAL_PORT, BAUDRATE, timeout=0.1)
+    Serial1 = serial.Serial(SERIAL_PORT, BAUDRATE, timeout=0.1)
     print(f"[INFO] Opened serial port {SERIAL_PORT} at {BAUDRATE} baud")
 except Exception as e:
     print(f"[ERROR] Could not open serial port: {e}")
@@ -672,14 +687,14 @@ def mysql_reporting_thread():
 # ---------------------------
 def serial_monitor_thread():
     """Thread that monitors serial for distance data"""
-    global ser, last_capture_time, last_processed_distance
+    global Serial1, last_capture_time, last_processed_distance
     print("[INFO] Serial monitor thread started, reading distance data...")
     buffer = ""
     try:
         while not shutdown_event.is_set():
-            if ser.in_waiting:
+            if Serial1.in_waiting:
                 try:
-                    data = ser.read(ser.in_waiting).decode('utf-8', errors='ignore')
+                    data = Serial1.read(Serial1.in_waiting).decode('utf-8', errors='ignore')
                     buffer += data
                     while '\n' in buffer:
                         line, buffer = buffer.split('\n', 1)
@@ -746,12 +761,6 @@ def process_fabric_immediate():
         # Send 'D' to Arduino if consecutive defect threshold is reached
         if consecutive_stitch_length_defects >= CONSECUTIVE_DEFECT_THRESHOLD or consecutive_stitch_edge_defects >= CONSECUTIVE_DEFECT_THRESHOLD:
             print(f"🚨 CONSECUTIVE DEFECT THRESHOLD REACHED - Alerting Arduino")
-            try:
-                ser.write(b'D')
-                ser.flush()
-                print(f"   └─ ✅ Sent 'D' signal to Arduino")
-            except Exception as e:
-                print(f"   └─ ❌ Failed to send 'D' to Arduino: {e}")
         if defects_found:
             print(f"📩 Defects detected - Data will be logged to MySQL")
         else:
@@ -767,6 +776,25 @@ def process_fabric_immediate():
 # ---------------------------
 def main():
     """Main function to start the system"""
+    # Initialize MQTT heartbeat
+    heartbeat = None
+    try:
+        # Use MQTT constants from config.py if you added them,
+
+        heartbeat = MqttHeartbeat(
+            broker=MQTT_SERVER,
+            port=MQTT_PORT,
+            username=MQTT_USERNAME,
+            password=MQTT_PASSWORD,
+            topic=MQTT_HEARTBEAT_TOPIC,
+            interval_sec=MQTT_HEARTBEAT_INTERVAL,
+            tls_insecure=MQTT_TLS_INSECURE,
+        )
+        heartbeat.start()
+        print(f"✅ MQTT heartbeat started: {MQTT_HEARTBEAT_TOPIC} (every {MQTT_HEARTBEAT_INTERVAL}s)")
+    except Exception as e:
+        print(f"⚠️ MQTT heartbeat not started: {e} (continuing without heartbeat)")
+
     print("🚀 STARTING OPTIMIZED FABRIC INSPECTION SYSTEM")
     print("=" * 50)
     print("System Architecture:")
@@ -792,12 +820,6 @@ def main():
     threads.append(cleanup_thread)
     print("✅ Image cleanup thread started")
     print(f"🎯 System ready! Processing fabric every 2 seconds...")
-    try:
-        ser.write(b'S')
-        ser.flush()
-        print(f"✅ Sent 'S' signal to Arduino")
-    except Exception as e:
-        print(f"❌ Failed to send 'S' to Arduino: {e}")
     print("   • Arduino sends: '<distance>' = Update distance")
     print("   • Python sends: 'D' = Consecutive defect threshold reached (LED blinks)")
     print("   • MySQL inserts: Every 2 seconds with defect status")
@@ -808,6 +830,8 @@ def main():
             time.sleep(0.1)
     except KeyboardInterrupt:
         print("\n🛑 Shutdown requested...")
+        if heartbeat:
+            heartbeat.stop()
         shutdown_event.set()
     print("🔄 Waiting for threads to finish...")
     for t in threads:
@@ -815,7 +839,7 @@ def main():
     if 'cap' in globals() and cap is not None:
         cap.release()
         print("✅ Camera released")
-    ser.close()
+    Serial1.close()
     print("✅ Serial port closed")
     print("✅ System shutdown complete")
 

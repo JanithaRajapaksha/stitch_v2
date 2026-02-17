@@ -6,3 +6,4 @@ pyserial
 mysql-connector-python
 python-dotenv
 PyYAML
+paho-mqtt
