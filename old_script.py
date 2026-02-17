@@ -11,46 +11,34 @@ from datetime import datetime
 import threading
 import mysql.connector
 from mysql.connector import Error
-from dotenv import load_dotenv
-import yaml
-
-load_dotenv()
-
-# ---------------------------
-# Load Configuration from YAML
-# ---------------------------
-with open("config.yaml", "r") as f:
-    config = yaml.safe_load(f)
 
 # ---------------------------
 # GPU Configuration
 # ---------------------------
-device = torch.device(config['gpu']['device'] if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 # ---------------------------
 # Configuration Parameters
 # ---------------------------
-SERIAL_PORT = config['serial']['port']
-BAUDRATE = config['serial']['baudrate']
-CAMERA_IDX = config['camera']['index']
-FRAME_W = config['camera']['width']
-FRAME_H = config['camera']['height']
-OUTPUT_DIR = config['output']['directory']
+SERIAL_PORT = "/dev/ttyACM0"
+BAUDRATE = 115200
+CAMERA_IDX = 0
+FRAME_W, FRAME_H = 480, 640
+OUTPUT_DIR = "thread_v2_snaps"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-IMAGE_RETENTION_SECONDS = config['output']['image_retention_seconds']
-CLEANUP_INTERVAL = config['output']['cleanup_interval']
+IMAGE_RETENTION_SECONDS = 86400  # Retain images for 24 hours
+CLEANUP_INTERVAL = 3600  # Check for old images every 1 hour
 
 # ---------------------------
 # MySQL Database Configuration
 # ---------------------------
 DB_CONFIG = {
-    'host': os.getenv("DB_HOST"),
-    'user': os.getenv("DB_USER"),
-    'password': os.getenv("DB_PASSWORD"),
-    'database': os.getenv("DB_DATABASE")
+    'host': 'aandc.siamsi.net',
+    'user': 'root',
+    'password': 'P@ssword@a&c',
+    'database': 'thread'
 }
-DB_TABLE = os.getenv("DB_TABLE")
 
 # ---------------------------
 # Open a single, global serial connection
@@ -72,38 +60,38 @@ processing_lock = threading.Lock()
 # Timing Configuration
 # ---------------------------
 last_db_insert_time = 0
-DB_INSERT_INTERVAL = config['database']['insert_interval']
+DB_INSERT_INTERVAL = 2.0  # Insert data every 2 seconds
 last_capture_time = 0
-CAPTURE_INTERVAL = config['processing']['capture_interval']
+CAPTURE_INTERVAL = 2.0
 last_processed_distance = 0.0  # Track last distance used for processing
 last_processed_time = 0  # Track last time a frame was processed
-MIN_DISTANCE_CHANGE_MM = config['processing']['min_distance_change_mm']
+MIN_DISTANCE_CHANGE_MM = 5.0  # Minimum distance change to trigger processing
 
 # ---------------------------
 # Consecutive Defect Tracking
 # ---------------------------
-CONSECUTIVE_DEFECT_THRESHOLD = config['defects']['consecutive_threshold']
+CONSECUTIVE_DEFECT_THRESHOLD = 15
 consecutive_stitch_length_defects = 0
 consecutive_stitch_edge_defects = 0
 
 # ---------------------------
 # Units and Classes
 # ---------------------------
-MM_PER_PIXEL = config['units']['mm_per_pixel']
+MM_PER_PIXEL = 0.1111
 print(f"Conversion factor: {MM_PER_PIXEL:.4f} mm per pixel")
 
-STITCH_CLASS_ID = config['classes']['stitch']
-EDGE_CLASS_ID = config['classes']['edge']
-MIN_STITCH_EDGE_DISTANCE_MM = config['defects']['min_stitch_edge_distance_mm']
-MAX_STITCH_EDGE_DISTANCE_MM = config['defects']['max_stitch_edge_distance_mm']
-MIN_STITCH_LENGTH_MM = config['defects']['min_stitch_length_mm']
-MAX_STITCH_LENGTH_MM = config['defects']['max_stitch_length_mm']
+STITCH_CLASS_ID = 0
+EDGE_CLASS_ID = 1
+MIN_STITCH_EDGE_DISTANCE_MM = 5.5
+MAX_STITCH_EDGE_DISTANCE_MM = 7.5
+MIN_STITCH_LENGTH_MM = 3.5
+MAX_STITCH_LENGTH_MM = 8.5
 
 # ---------------------------
 # Data Storage
 # ---------------------------
 current_total_distance = 0.0
-machine_id = config['machine']['id']
+machine_id = "fabric_inspection_l01"
 
 # ---------------------------
 # Helper Functions
@@ -126,8 +114,8 @@ def insert_to_mysql():
         connection = mysql.connector.connect(**DB_CONFIG)
         if connection.is_connected():
             cursor = connection.cursor()
-            insert_query = f'''
-            INSERT INTO {DB_TABLE} (time_stamp, total_distance, ng_stitch_count, ng_length)
+            insert_query = '''
+            INSERT INTO sew_mach_011 (time_stamp, total_distance, ng_stitch_count, ng_length)
             VALUES (%s, %s, %s, %s)
             '''
             # Determine defect status based on consecutive defect threshold
