@@ -6,6 +6,7 @@ import time
 import os
 import signal
 import sys
+
 import serial
 from datetime import datetime
 import threading
