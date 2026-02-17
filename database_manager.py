@@ -6,6 +6,15 @@ import config
 
 class DatabaseManager:
     def __init__(self):
+        """
+        Initializes a DatabaseManager object.
+
+        Sets the database configuration and table name from the
+        config module.
+
+        :param self: The DatabaseManager object
+        :type self: DatabaseManager
+        """
         self.db_config = config.DB_CONFIG
         self.db_table = config.DB_TABLE
 

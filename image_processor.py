@@ -10,6 +10,19 @@ from calibration import get_mm_per_pixel
 
 class ImageProcessor:
     def __init__(self, model):
+        """
+        Initializes the ImageProcessor object with the given model.
+        
+        Args:
+            model (object): The deep learning model used for defect detection.
+        
+        Attributes:
+            model (object): The deep learning model used for defect detection.
+            mm_per_pixel (float): The conversion factor from pixels to millimeters.
+            last_processed_time (float): The timestamp of the last processed frame.
+            consecutive_stitch_length_defects (int): The number of consecutive frames with stitch length defects.
+            consecutive_stitch_edge_defects (int): The number of consecutive frames with stitch edge defects.
+        """
         self.model = model
         self.mm_per_pixel = get_mm_per_pixel()
         self.last_processed_time = 0
