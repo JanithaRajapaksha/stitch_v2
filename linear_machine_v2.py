@@ -91,8 +91,8 @@ DB_TABLE = os.getenv("DB_TABLE")
 # -------------------------
 MQTT_SERVER = os.getenv("MQTT_SERVER", "mqtt.anc.idea8.cloud")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "8883"))
-MQTT_USERNAME = os.getenv("MQTT_USERNAME", 'backend')
-MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", 'bbf12cwcpm')
+MQTT_USERNAME = os.getenv("MQTT_USERNAME")
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 
 # device id = DB_TABLE (as you specified)
 DEVICE_ID = DB_TABLE
@@ -181,6 +181,8 @@ MAX_STITCH_LENGTH_MM = config['defects']['max_stitch_length_mm']
 # ---------------------------
 current_total_distance = 0.0
 machine_id = config['machine']['id']
+# Initialize with a sensible default from config, this will be updated after the first frame.
+last_avg_stitch_length_mm = (MIN_STITCH_LENGTH_MM + MAX_STITCH_LENGTH_MM) / 2.0
 
 # ---------------------------
 # Helper Functions
@@ -646,16 +648,19 @@ def process_defects(results, ts):
 # ---------------------------
 # Serial Communication Handler
 # ---------------------------
-def parse_arduino_data(data_line):
-    """Parse distance data from Arduino"""
-    global current_total_distance
+def update_distance_from_stitch_count(data_line):
+    """Parse stitch count from Arduino and calculate total distance."""
+    global current_total_distance, last_avg_stitch_length_mm
     try:
-        distance = float(data_line.strip())
-        current_total_distance = distance
-        print(f"📏 Updated total distance: {current_total_distance:.2f}mm")
+        stitch_count = int(data_line.strip())
+        if last_avg_stitch_length_mm > 0:
+            current_total_distance = stitch_count * last_avg_stitch_length_mm
+            print(f"📏 Updated total distance: {current_total_distance:.2f}mm (Stitches: {stitch_count}, Avg Length: {last_avg_stitch_length_mm:.2f}mm)")
+        else:
+            print(f"⚠️ Cannot calculate distance: Average stitch length is not available yet. (Stitch count: {stitch_count})")
         return True
     except ValueError:
-        print(f"⚠️ Failed to parse distance: {data_line}")
+        print(f"⚠️ Failed to parse stitch count: {data_line}")
         return False
 
 # ---------------------------
@@ -700,7 +705,7 @@ def serial_monitor_thread():
                         line, buffer = buffer.split('\n', 1)
                         line = line.strip()
                         if line:
-                            if parse_arduino_data(line):
+                            if update_distance_from_stitch_count(line):
                                 current_time = time.time()
                                 # Check if time interval and distance change are sufficient
                                 if (current_time - last_capture_time >= CAPTURE_INTERVAL and
@@ -728,6 +733,7 @@ def serial_monitor_thread():
 
 def process_fabric_immediate():
     """Process fabric immediately when triggered"""
+    global last_avg_stitch_length_mm
     try:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
         print(f"🔍 Starting fabric analysis at {ts}")
@@ -740,6 +746,11 @@ def process_fabric_immediate():
         results = process_frame(frame)
         processing_time = time.time() - start_time
         annotated, summary, defects, result = results
+
+        # Update the global average stitch length for the next distance calculation
+        if summary.get('avg_stitch_length_mm') is not None:
+            last_avg_stitch_length_mm = summary['avg_stitch_length_mm']
+
         out_path = os.path.join(OUTPUT_DIR, f"fabric_{ts}.jpg")
         cv2.imwrite(out_path, annotated)
         print(f"📊 FABRIC ANALYSIS RESULTS ({summary['timestamp']}):")
@@ -758,9 +769,6 @@ def process_fabric_immediate():
             print(f"   ├─ Avg Stitch-Top Edge Distance: Not measurable")
         print(f"   └─ Processing Time: {processing_time:.2f}s")
         defects_found = process_defects(results, ts)
-        # Send 'D' to Arduino if consecutive defect threshold is reached
-        if consecutive_stitch_length_defects >= CONSECUTIVE_DEFECT_THRESHOLD or consecutive_stitch_edge_defects >= CONSECUTIVE_DEFECT_THRESHOLD:
-            print(f"🚨 CONSECUTIVE DEFECT THRESHOLD REACHED - Alerting Arduino")
         if defects_found:
             print(f"📩 Defects detected - Data will be logged to MySQL")
         else:
@@ -799,7 +807,6 @@ def main():
     print("=" * 50)
     print("System Architecture:")
     print("  • Arduino: Motor control + distance data")
-    print("  • Python: Periodic processing every 2 seconds + 'D' signal on consecutive defects")
     print("  • MySQL: Data insertion every 2 seconds")
     print("  • Image Cleanup: Deletes images older than 24 hours")
     print("=" * 50)
@@ -821,7 +828,6 @@ def main():
     print("✅ Image cleanup thread started")
     print(f"🎯 System ready! Processing fabric every 2 seconds...")
     print("   • Arduino sends: '<distance>' = Update distance")
-    print("   • Python sends: 'D' = Consecutive defect threshold reached (LED blinks)")
     print("   • MySQL inserts: Every 2 seconds with defect status")
     print("   • Image cleanup: Every 1 hour, deleting files older than 24 hours")
     print("-" * 50)
