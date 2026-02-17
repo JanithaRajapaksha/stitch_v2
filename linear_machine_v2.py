@@ -89,8 +89,8 @@ DB_TABLE = os.getenv("DB_TABLE")
 # ---------------------------
 # MQTT Config (Heartbeat)
 # -------------------------
-MQTT_SERVER = os.getenv("MQTT_SERVER", "mqtt.anc.idea8.cloud")
-MQTT_PORT = int(os.getenv("MQTT_PORT", "8883"))
+MQTT_SERVER = os.getenv("MQTT_SERVER")
+MQTT_PORT = int(os.getenv("MQTT_PORT"))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 
@@ -171,10 +171,6 @@ except Exception as e:
 
 STITCH_CLASS_ID = config['classes']['stitch']
 EDGE_CLASS_ID = config['classes']['edge']
-MIN_STITCH_EDGE_DISTANCE_MM = config['defects']['min_stitch_edge_distance_mm']
-MAX_STITCH_EDGE_DISTANCE_MM = config['defects']['max_stitch_edge_distance_mm']
-MIN_STITCH_LENGTH_MM = config['defects']['min_stitch_length_mm']
-MAX_STITCH_LENGTH_MM = config['defects']['max_stitch_length_mm']
 
 # ---------------------------
 # Data Storage
@@ -182,7 +178,7 @@ MAX_STITCH_LENGTH_MM = config['defects']['max_stitch_length_mm']
 current_total_distance = 0.0
 machine_id = config['machine']['id']
 # Initialize with a sensible default from config, this will be updated after the first frame.
-last_avg_stitch_length_mm = (MIN_STITCH_LENGTH_MM + MAX_STITCH_LENGTH_MM) / 2.0
+last_avg_stitch_length_mm = 0.0
 
 # ---------------------------
 # Helper Functions
@@ -473,30 +469,19 @@ def calculate_stitch_edge_distances(result):
 # Defect Detection with Consecutive Tracking
 # ---------------------------
 def check_defects(predictions, distance_results):
-    """Check for defects in stitch length and edge distance"""
+    """Placeholder for defect checking. Currently, no defects are checked."""
     global consecutive_stitch_length_defects, consecutive_stitch_edge_defects
-    defects = {}
+    defects = {
+        "stitch_edge_distance": False,
+        "stitch_length": False,
+    }
     coverage_info = {}
     coverage_info["avg_stitch_edge_distance_mm"] = distance_results.get('avg_distance_mm')
     has_distance_measurements = coverage_info["avg_stitch_edge_distance_mm"] is not None
     coverage_info["has_distance_measurement"] = has_distance_measurements
 
-    # Check stitch-edge distance defects
-    if has_distance_measurements:
-        avg_d = coverage_info["avg_stitch_edge_distance_mm"]
-        defects["stitch_edge_distance"] = (avg_d < MIN_STITCH_EDGE_DISTANCE_MM) or (avg_d > MAX_STITCH_EDGE_DISTANCE_MM)
-        if defects["stitch_edge_distance"]:
-            consecutive_stitch_edge_defects += 1
-            print(f"🔄 Consecutive stitch-edge defects: {consecutive_stitch_edge_defects}/{CONSECUTIVE_DEFECT_THRESHOLD}")
-            if consecutive_stitch_edge_defects >= CONSECUTIVE_DEFECT_THRESHOLD:
-                print(f"🚨 THRESHOLD REACHED: {CONSECUTIVE_DEFECT_THRESHOLD} consecutive stitch-edge defects!")
-        else:
-            # Reset only if a valid, non-defective measurement is obtained
-            consecutive_stitch_edge_defects = 0
-            print(f"✅ Valid stitch-edge distance ({avg_d:.2f}mm) - Resetting consecutive edge defects")
-    else:
-        # Do not reset counter on non-measurable case
-        print(f"⚠️ Stitch-edge distance not measurable, maintaining defect count: {consecutive_stitch_edge_defects}")
+    consecutive_stitch_edge_defects = 0
+    consecutive_stitch_length_defects = 0
 
     # Process stitch lengths
     stitch_lengths = []
@@ -513,37 +498,9 @@ def check_defects(predictions, distance_results):
                 'center': ((x1 + x2) / 2, (y1 + y2) / 2)
             })
 
-    # Check stitch length defects
-    stitch_length_defects = []
-    for i, stitch in enumerate(stitch_lengths):
-        length_mm = stitch['length_mm']
-        if length_mm < MIN_STITCH_LENGTH_MM or length_mm > MAX_STITCH_LENGTH_MM:
-            stitch_length_defects.append({
-                'index': i,
-                'length_mm': length_mm,
-                'box': stitch['box'],
-                'too_short': length_mm < MIN_STITCH_LENGTH_MM,
-                'too_long': length_mm > MAX_STITCH_LENGTH_MM
-            })
-
     coverage_info["avg_stitch_length_mm"] = sum(s['length_mm'] for s in stitch_lengths) / len(stitch_lengths) if stitch_lengths else None
-    if coverage_info["avg_stitch_length_mm"] is not None:
-        avg_length_mm = coverage_info["avg_stitch_length_mm"]
-        defects["stitch_length"] = avg_length_mm < MIN_STITCH_LENGTH_MM or avg_length_mm > MAX_STITCH_LENGTH_MM
-        if defects["stitch_length"]:
-            consecutive_stitch_length_defects += 1
-            print(f"🔄 Consecutive stitch length defects: {consecutive_stitch_length_defects}/{CONSECUTIVE_DEFECT_THRESHOLD}")
-            if consecutive_stitch_length_defects >= CONSECUTIVE_DEFECT_THRESHOLD:
-                print(f"🚨 THRESHOLD REACHED: {CONSECUTIVE_DEFECT_THRESHOLD} consecutive stitch length defects!")
-        else:
-            # Reset only if a valid, non-defective measurement is obtained
-            consecutive_stitch_length_defects = 0
-            print(f"✅ Valid stitch length ({avg_length_mm:.2f}mm) - Resetting consecutive length defects")
-    else:
-        # Do not reset counter on non-measurable case
-        print(f"⚠️ Stitch length not measurable, maintaining defect count: {consecutive_stitch_length_defects}")
-
-    coverage_info["stitch_length_defects"] = stitch_length_defects
+    
+    coverage_info["stitch_length_defects"] = []
     coverage_info["stitch_lengths"] = stitch_lengths
     return defects, coverage_info
 
@@ -577,7 +534,7 @@ def process_frame(frame):
     for stitch in stitch_lengths:
         cx, cy = int(stitch['center'][0]), int(stitch['center'][1])
         length_mm = stitch['length_mm']
-        color = (0, 0, 255) if length_mm < MIN_STITCH_LENGTH_MM or length_mm > MAX_STITCH_LENGTH_MM else (0, 255, 0)
+        color = (0, 255, 0)
         cv2.putText(annotated, f"{length_mm:.1f}mm", (cx + 5, cy - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
     stitch_count = len(dist_res['stitch_centers'])
@@ -594,9 +551,9 @@ def process_frame(frame):
                 (10, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
     if coverage_info.get("avg_stitch_length_mm") is not None:
         avg_length = coverage_info["avg_stitch_length_mm"]
-        stitch_length_color = (0, 255, 0) if MIN_STITCH_LENGTH_MM <= avg_length <= MAX_STITCH_LENGTH_MM else (0, 0, 255)
+        stitch_length_color = (0, 255, 0)
         cv2.putText(annotated,
-                    f"Avg Stitch Length: {avg_length:.2f}mm ({MIN_STITCH_LENGTH_MM}-{MAX_STITCH_LENGTH_MM}mm)",
+                    f"Avg Stitch Length: {avg_length:.2f}mm",
                     (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, stitch_length_color, 2)
         stitches_per_inch = calculate_stitches_per_inch(avg_length)
         cv2.putText(annotated, f"Stitches/inch: {stitches_per_inch:.1f}",
@@ -608,7 +565,7 @@ def process_frame(frame):
     if coverage_info["has_distance_measurement"] and coverage_info.get("avg_stitch_edge_distance_mm") is not None:
         avg_dist = coverage_info["avg_stitch_edge_distance_mm"]
         cv2.putText(annotated,
-                    f"Avg Stitch-Top Edge Dist: {avg_dist:.2f}mm ({MIN_STITCH_EDGE_DISTANCE_MM}-{MAX_STITCH_EDGE_DISTANCE_MM}mm)",
+                    f"Avg Stitch-Top Edge Dist: {avg_dist:.2f}mm",
                     (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.6, edge_dist_color, 2)
     else:
         cv2.putText(annotated, "Avg Stitch-Top Edge Dist: Not measurable",
